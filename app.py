@@ -1,33 +1,30 @@
-from flask import Flask, request
-import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
+    print("Mensaje recibido:", data)
 
-    # Extraemos el número y el mensaje
-    try:
-        sender = data['from']
-        message = data['body'].strip().lower()
+    if data and "body" in data and "from" in data:
+        incoming_msg = data["body"].lower()
+        sender = data["from"]
 
-        # Aquí simplemente respondemos algo fijo
-        respuesta = "Hola, soy Lia 🤖. Estoy conectada y lista para ayudarte."
+        # Mensaje de respuesta simple
+        reply = "👋 ¡Hola! Soy tu asistente Lia, ¿en qué puedo ayudarte hoy?"
 
-        # Enviar la respuesta por UltraMsg
-        requests.post(
-            "https://api.ultramsg.com/instance111839/messages/chat",
-            data={
-                "token": "r4wm825i3lqivpku",
-                "to": sender,
-                "body": respuesta
-            }
-        )
-    except Exception as e:
-        print("Error procesando mensaje:", e)
+        return jsonify({
+            "to": sender,
+            "message": reply
+        })
 
-    return "ok"
+    return "ok", 200
+
+@app.route("/")
+def home():
+    return "Bot de WhatsApp activo"
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(host="0.0.0.0", port=10000)
+
