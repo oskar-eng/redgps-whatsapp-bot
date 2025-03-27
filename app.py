@@ -1,61 +1,67 @@
 from flask import Flask, request, jsonify
 import requests
+import os
 
 app = Flask(__name__)
 
-# Configura tus credenciales de UltraMsg
-ULTRAMSG_INSTANCE_ID = "instance111839"
-ULTRAMSG_TOKEN = "r4wm825i3lqivpku"
-
-# URL de tu API de activos
-ACTIVOS_API_URL = "https://redgps-proxy.onrender.com/activos"
-
-# Funciones de utilidad para enviar mensajes por UltraMsg
-def enviar_mensaje(numero, mensaje):
-    url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": numero,
-        "body": mensaje
-    }
-    response = requests.post(url, data=payload)
-    return response.status_code == 200
-
-# Funciones para interpretar comandos
-
-def buscar_datos_por_placa(placa):
-    try:
-        response = requests.get(ACTIVOS_API_URL)
-        data = response.json()
-        for unidad in data:
-            if placa.lower() in unidad["unidad"].lower():
-                return unidad
-    except:
-        return None
-    return None
+# Variables de entorno de UltraMsg
+INSTANCE_ID = os.getenv("ULTRA_INSTANCE_ID")
+TOKEN = os.getenv("ULTRA_TOKEN")
+ACTIVOS_API_URL = os.getenv("ACTIVOS_API_URL")  # URL de la API en Render
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    mensaje = data.get("body", "").lower()
-    numero = data.get("from", "")
 
-    if mensaje.startswith("bateria"):
-        partes = mensaje.split(" ")
-        if len(partes) == 2:
-            placa = partes[1]
-            unidad = buscar_datos_por_placa(placa)
-            if unidad:
-                texto = f"🔋 Unidad {unidad['unidad']}\nBatería: {unidad['bateria']}%\n⏰ Último reporte: {unidad['ultimo_reporte']}"
-            else:
-                texto = f"No se encontró la unidad '{placa}'."
+    if not data or "body" not in data:
+        return jsonify({"status": "no data"})
+
+    message = data["body"].get("message")
+    sender = data["body"].get("from")
+
+    if not message or not sender:
+        return jsonify({"status": "invalid message"})
+
+    if message.lower().startswith("bateria"):
+        partes = message.split()
+        if len(partes) >= 2:
+            placa = partes[1].strip()
+            return consultar_bateria(placa, sender)
         else:
-            texto = "Formato incorrecto. Escribe: bateria [placa]"
+            return send_whatsapp(sender, "⚠️ Debes indicar una placa. Ej: bateria CE-025067")
 
-        enviar_mensaje(numero, texto)
+    return send_whatsapp(sender, "ℹ️ Hola! Puedes consultar así: bateria CE-025067")
 
-    return jsonify({"status": "ok"})
 
-# Esto es para pruebas locales. En Render, no es necesario ejecutar app.run
+def consultar_bateria(placa, telefono):
+    try:
+        response = requests.get(ACTIVOS_API_URL)
+        activos = response.json()
+
+        for activo in activos:
+            if activo.get("unidad") == placa:
+                mensaje = f"🔋 Unidad {placa}\nBatería: {activo['bateria']}%\n⏰ Último reporte: {activo['ultimo_reporte']}"
+                return send_whatsapp(telefono, mensaje)
+
+        return send_whatsapp(telefono, f"❌ No se encontró la unidad {placa}")
+
+    except Exception as e:
+        return send_whatsapp(telefono, f"❌ Error al consultar la batería: {str(e)}")
+
+
+def send_whatsapp(to, message):
+    url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/chat"
+    payload = {
+        "token": TOKEN,
+        "to": to,
+        "body": message
+    }
+    try:
+        r = requests.post(url, data=payload)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
